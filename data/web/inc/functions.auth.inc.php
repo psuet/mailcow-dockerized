@@ -3,7 +3,7 @@ function check_login($user, $pass, $app_passwd_data = false, $extra = null) {
   global $pdo;
   global $redis;
 
-  $is_internal = $extra['is_internal'];
+  $is_internal = array_key_exists('is_internal', $extra) ? $extra['is_internal'] : false;
   $role = $extra['role'];
 
   // Try validate admin

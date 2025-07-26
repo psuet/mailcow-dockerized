@@ -40,10 +40,16 @@
       <legend style="padding-top:20px" unselectable="on">{{ lang.admin.ip_check }}</legend><hr />
       <div id="ip_check">
         <form class="form" data-id="ip_check" role="form" method="post">
-          <div class="mb-4">
+          <div class="ms-2 mb-1">
             <input class="form-check-input" type="checkbox" value="1" name="ip_check_opt_in" id="ip_check_opt_in" {% if ip_check == 1 %}checked{% endif %}>
             <label class="form-check-label" for="ip_check_opt_in">
               {{ lang.admin.ip_check_opt_in|raw }}
+            </label>
+          </div>
+          <div class="ms-2 mb-1">
+            <input class="form-check-input" type="checkbox" value="1" name="ip_location_opt_in" id="ip_location_opt_in" {% if ip_location == 1 %}checked{% endif %}>
+            <label class="form-check-label" for="ip_location_opt_in">
+              {{ lang.admin.ip_location_opt_in|raw }}
             </label>
           </div>
           <p><div class="btn-group">
@@ -51,6 +57,7 @@
           </div></p>
         </form>
       </div>
+
       <legend style="padding-top:20px" unselectable="on">{{ lang.admin.login_page }}</legend><hr />
       <div>
         <form class="form" data-id="custom_login" role="form" method="post">

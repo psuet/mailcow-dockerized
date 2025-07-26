@@ -1,4 +1,14 @@
 <?php
+
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/Domain.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/AliasDomain.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/Alias.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/Mailbox.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/DomainWideFooter.php';
+
 function mailbox($_action, $_type, $_data = null, $_extra = null) {
   global $pdo;
   global $redis;
@@ -563,15 +573,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               return false;
             }
           }
-          $stmt = $pdo->prepare("SELECT `domain` FROM `domain`
-            WHERE `domain` = :domain");
-          $stmt->execute(array(':domain' => $domain));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          $stmt = $pdo->prepare("SELECT `alias_domain` FROM `alias_domain`
-            WHERE `alias_domain` = :domain");
-          $stmt->execute(array(':domain' => $domain));
-          $num_results = $num_results + count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results != 0) {
+          $domain_exists = Domain::where('domain', $domain)->exists() || AliasDomain::where('alias_domain', $domain)->exists();
+          if ($domain_exists) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -593,22 +596,20 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             ':domain' => '%@' . $domain
           ));
           // save domain
-          $stmt = $pdo->prepare("INSERT INTO `domain` (`domain`, `description`, `aliases`, `mailboxes`, `defquota`, `maxquota`, `quota`, `backupmx`, `gal`, `active`, `relay_unknown_only`, `relay_all_recipients`)
-            VALUES (:domain, :description, :aliases, :mailboxes, :defquota, :maxquota, :quota, :backupmx, :gal, :active, :relay_unknown_only, :relay_all_recipients)");
-          $stmt->execute(array(
-            ':domain' => $domain,
-            ':description' => $description,
-            ':aliases' => $aliases,
-            ':mailboxes' => $mailboxes,
-            ':defquota' => $defquota,
-            ':maxquota' => $maxquota,
-            ':quota' => $quota,
-            ':backupmx' => $backupmx,
-            ':gal' => $gal,
-            ':active' => $active,
-            ':relay_unknown_only' => $relay_unknown_only,
-            ':relay_all_recipients' => $relay_all_recipients
-          ));
+          Domain::create([
+            'domain' => $domain,
+            'description' => $description,
+            'aliases' => $aliases,
+            'mailboxes' => $mailboxes,
+            'defquota' => $defquota * 1024 ** 2, // convert to bytes
+            'maxquota' => $maxquota * 1024 ** 2, // convert to bytes
+            'quota' => $quota * 1024 ** 2, // convert to bytes
+            'backupmx' => $backupmx,
+            'gal' => $gal,
+            'active' => $active,
+            'relay_unknown_only' => $relay_unknown_only,
+            'relay_all_recipients' => $relay_all_recipients
+          ]);
           // save tags
           foreach($tags as $index => $tag){
             if (empty($tag)) continue;
@@ -963,13 +964,12 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             $stmt->execute(array(
               ':domain' => '%@' . $domain
             ));
-            $stmt = $pdo->prepare("INSERT INTO `alias_domain` (`alias_domain`, `target_domain`, `active`)
-              VALUES (:alias_domain, :target_domain, :active)");
-            $stmt->execute(array(
-              ':alias_domain' => $alias_domain,
-              ':target_domain' => $target_domain,
-              ':active' => $active
-            ));
+
+            AliasDomain::create([
+              'alias_domain' => $alias_domain,
+              'target_domain' => $target_domain,
+              'active' => $active
+            ]);
             try {
               $redis->hSet('DOMAIN_MAP', $alias_domain, 1);
             }
@@ -1117,10 +1117,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `mailboxes`, `maxquota`, `quota` FROM `domain`
-            WHERE `domain` = :domain");
-          $stmt->execute(array(':domain' => $domain));
-          $DomainData = $stmt->fetch(PDO::FETCH_ASSOC);
+          $DomainData = Domain::find($domain);
           $stmt = $pdo->prepare("SELECT
             COUNT(*) as count,
             COALESCE(ROUND(SUM(`quota`)/1048576), 0) as `quota`
@@ -1129,10 +1126,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                   AND `domain` = :domain");
           $stmt->execute(array(':domain' => $domain));
           $MailboxData = $stmt->fetch(PDO::FETCH_ASSOC);
-          $stmt = $pdo->prepare("SELECT `local_part` FROM `mailbox` WHERE `local_part` = :local_part and `domain`= :domain");
-          $stmt->execute(array(':local_part' => $local_part, ':domain' => $domain));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results != 0) {
+
+          if (Mailbox::where('domain', $domain)->where('local_part', $local_part)->exists()) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1140,10 +1135,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `address` FROM `alias` WHERE address= :username");
-          $stmt->execute(array(':username' => $username));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results != 0) {
+          if (Alias::where('address', $username)->exists()) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1162,10 +1154,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `domain` FROM `domain` WHERE `domain`= :domain");
-          $stmt->execute(array(':domain' => $domain));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results == 0) {
+          if (!Domain::find($domain)) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1179,24 +1168,24 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             }
             $password_hashed = hash_password($password);
           }
-          if ($MailboxData['count'] >= $DomainData['mailboxes']) {
+          if ($MailboxData['count'] >= $DomainData->mailboxes) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
-              'msg' => array('max_mailbox_exceeded', $MailboxData['count'], $DomainData['mailboxes'])
+              'msg' => array('max_mailbox_exceeded', $MailboxData['count'], $DomainData->mailboxes)
             );
             return false;
           }
-          if ($quota_m > $DomainData['maxquota']) {
+          if ($quota_m > $DomainData->maxquota) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
-              'msg' => array('mailbox_quota_exceeded', $DomainData['maxquota'])
+              'msg' => array('mailbox_quota_exceeded', $DomainData->maxquota)
             );
             return false;
           }
-          if (($MailboxData['quota'] + $quota_m) > $DomainData['quota']) {
-            $quota_left_m = ($DomainData['quota'] - $MailboxData['quota']);
+          if (($MailboxData['quota'] + $quota_m) > $DomainData->quota) {
+            $quota_left_m = ($DomainData->quota - $MailboxData['quota']);
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1443,10 +1432,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `username` FROM `mailbox` WHERE `username` = :name");
-          $stmt->execute(array(':name' => $name));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results != 0) {
+
+          if (Mailbox::find($name)) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1454,10 +1441,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `address` FROM `alias` WHERE address= :name");
-          $stmt->execute(array(':name' => $name));
-          $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-          if ($num_results != 0) {
+          if (Alias::where('address', $name)->exists()) {
             $_SESSION['return'][] = array(
               'type' => 'danger',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -1734,15 +1718,10 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            $stmt = $pdo->prepare("UPDATE `alias_domain` SET
-              `target_domain` = :target_domain,
-              `active` = :active
-                WHERE `alias_domain` = :alias_domain");
-            $stmt->execute(array(
-              ':alias_domain' => $alias_domain,
-              ':target_domain' => $target_domain,
-              ':active' => $active
-            ));
+            AliasDomain::find($alias_domain)->update([
+              'target_domain' => $target_domain,
+              'active' => $active
+            ]);
             $_SESSION['return'][] = array(
               'type' => 'success',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -2714,14 +2693,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                         AND domain = :domain");
               $stmt->execute(array(':domain' => $domain));
               $MailboxData = $stmt->fetch(PDO::FETCH_ASSOC);
-              // todo: should be using api here
-              $stmt = $pdo->prepare("SELECT COUNT(*) AS `count` FROM `alias`
-                  WHERE domain = :domain
-                  AND address NOT IN (
-                    SELECT `username` FROM `mailbox`
-                  )");
-              $stmt->execute(array(':domain' => $domain));
-              $AliasData = $stmt->fetch(PDO::FETCH_ASSOC);
+              $aliases_in_use = Domain::find($domain)->aliases()->count();
               if ($defquota > $maxquota) {
                 $_SESSION['return'][] = array(
                     'type' => 'danger',
@@ -2778,11 +2750,11 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                 );
                 continue;
               }
-              if ($AliasData['count'] > $aliases) {
+              if ($aliases_in_use > $aliases) {
                 $_SESSION['return'][] = array(
                   'type' => 'danger',
                   'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
-                  'msg' => array('aliases_in_use', $AliasData['count'])
+                  'msg' => array('aliases_in_use', $aliases_in_use)
                 );
                 continue;
               }
@@ -3001,11 +2973,11 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            if ($quota_m > $DomainData['max_quota_for_mbox']) {
+            if ($quota_m > $DomainData->max_quota_for_mbox) {
               $_SESSION['return'][] = array(
                 'type' => 'danger',
                 'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
-                'msg' => array('mailbox_quota_exceeded', $DomainData['max_quota_for_mbox'])
+                'msg' => array('mailbox_quota_exceeded', $DomainData->max_quota_for_mbox)
               );
               continue;
             }
@@ -3824,15 +3796,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             }
             foreach ($_data["exclude"] as $exclude) {
               if (filter_var($exclude, FILTER_VALIDATE_EMAIL)) {
-                $stmt = $pdo->prepare("SELECT `address` FROM `alias` WHERE `address` = :address
-                  UNION
-                  SELECT `username` FROM `mailbox` WHERE `username` = :username");
-                $stmt->execute(array(
-                  ':address' => $exclude,
-                  ':username' => $exclude,
-                ));
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if(!$row){
+                if(!Alias::where('address', $exclude)->exists() && !Mailbox::find($exclude)->exists()){
                   $_SESSION['return'][] = array(
                     'type' => 'danger',
                     'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -3843,12 +3807,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                 array_push($footers['mbox_exclude'], $exclude);
               }
               elseif (is_valid_domain_name($exclude)) {
-                $stmt = $pdo->prepare("SELECT `alias_domain` FROM `alias_domain` WHERE `alias_domain` = :alias_domain");
-                $stmt->execute(array(
-                  ':alias_domain' => $exclude,
-                ));
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if(!$row){
+                if(!AliasDomain::find($exclude)){
                   $_SESSION['return'][] = array(
                     'type' => 'danger',
                     'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -3886,27 +3845,19 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               return false;
             }
 
-            try {
-              $stmt = $pdo->prepare("DELETE FROM `domain_wide_footer` WHERE `domain`= :domain");
-              $stmt->execute(array(':domain' => $domain));
-              $stmt = $pdo->prepare("INSERT INTO `domain_wide_footer` (`domain`, `html`, `plain`, `mbox_exclude`, `alias_domain_exclude`, `skip_replies`) VALUES (:domain, :html, :plain, :mbox_exclude, :alias_domain_exclude, :skip_replies)");
-              $stmt->execute(array(
-                ':domain' => $domain,
-                ':html' => $footers['html'],
-                ':plain' => $footers['plain'],
-                ':mbox_exclude' => json_encode($footers['mbox_exclude']),
-                ':alias_domain_exclude' => json_encode($footers['alias_domain_exclude']),
-                ':skip_replies' => $footers['skip_replies'],
-              ));
-            }
-            catch (PDOException $e) {
-              $_SESSION['return'][] = array(
-                'type' => 'danger',
-                'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
-                'msg' => $e->getMessage()
-              );
-              return false;
-            }
+            DomainWideFooter::updateOrCreate(
+              [
+                'domain' => $domain
+              ],
+              [
+                'html' => $footers['html'],
+                'plain' => $footers['plain'],
+                'mbox_exclude' => $footers['mbox_exclude'],
+                'alias_domain_exclude' => $footers['alias_domain_exclude'],
+                'skip_replies' => $footers['skip_replies']
+              ]
+            );
+
             $_SESSION['return'][] = array(
               'type' => 'success',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -4071,14 +4022,9 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           }
           elseif (isset($_data) && hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
             // get by domain
-            $stmt = $pdo->prepare("SELECT `username` FROM `mailbox` WHERE (`kind` = '' OR `kind` = NULL) AND `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $_data,
-            ));
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            while($row = array_shift($rows)) {
-              $mailboxes[] = $row['username'];
-            }
+            Mailbox::where('domain', $_data)->where('kind', '')->orWhereNull('kind')->get(['username'])->each(function($mailbox) use (&$mailboxes) {
+              $mailboxes[] = $mailbox->username;
+            });
           }
           else {
             $stmt = $pdo->prepare("SELECT `username` FROM `mailbox` WHERE (`kind` = '' OR `kind` = NULL) AND (`domain` IN (SELECT `domain` FROM `domain_admins` WHERE `active` = '1' AND `username` = :username) OR 'admin' = :role)");
@@ -4103,10 +4049,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           else {
             $_data = $_SESSION['mailcow_cc_username'];
           }
-          $stmt = $pdo->prepare("SELECT `attributes` FROM `mailbox` WHERE `username` = :username");
-          $stmt->execute(array(':username' => $_data));
-          $attrs = $stmt->fetch(PDO::FETCH_ASSOC);
-          $attrs = json_decode($attrs['attributes'], true);
+          $mailbox = Mailbox::find($_data);
+          $attrs = $mailbox->attributes;
           return array(
             'tls_enforce_in' => $attrs['tls_enforce_in'],
             'tls_enforce_out' => $attrs['tls_enforce_out']
@@ -4122,11 +4066,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           else {
             $_data = $_SESSION['mailcow_cc_username'];
           }
-          $stmt = $pdo->prepare("SELECT `attributes` FROM `mailbox` WHERE `username` = :username");
-          $stmt->execute(array(':username' => $_data));
-          $attrs = $stmt->fetch(PDO::FETCH_ASSOC);
-          $attrs = json_decode($attrs['attributes'], true);
-          return $attrs['quarantine_notification'];
+          $mailbox = Mailbox::find($_data);
+          return $mailbox->attributes['quarantine_notification'];
         break;
         case 'quarantine_category':
           $attrs = array();
@@ -4138,11 +4079,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           else {
             $_data = $_SESSION['mailcow_cc_username'];
           }
-          $stmt = $pdo->prepare("SELECT `attributes` FROM `mailbox` WHERE `username` = :username");
-          $stmt->execute(array(':username' => $_data));
-          $attrs = $stmt->fetch(PDO::FETCH_ASSOC);
-          $attrs = json_decode($attrs['attributes'], true);
-          return $attrs['quarantine_category'];
+          $mailbox = Mailbox::find($_data);
+          return $mailbox->attributes['quarantine_category'];
         break;
         case 'filters':
           $filters = array();
@@ -4412,16 +4350,15 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             return false;
           }
           elseif (isset($_data) && hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
-            $stmt = $pdo->prepare("SELECT `username` FROM `mailbox` WHERE `kind` REGEXP 'location|thing|group' AND `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $_data,
-            ));
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            while($row = array_shift($rows)) {
-              $resources[] = $row['username'];
-            }
+            Mailbox::where('domain', $_data)
+              ->whereIn('kind', ['location', 'thing', 'group'])
+              ->get(['username'])
+              ->each(function($mailbox) use (&$resources) {
+                $resources[] = $mailbox->username;
+              });
           }
           else {
+
             $stmt = $pdo->prepare("SELECT `username` FROM `mailbox` WHERE `kind` REGEXP 'location|thing|group' AND `domain` IN (SELECT `domain` FROM `domain_admins` WHERE `active` = '1' AND `username` = :username) OR 'admin' = :role");
             $stmt->execute(array(
               ':username' => $_SESSION['mailcow_cc_username'],
@@ -4440,92 +4377,56 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             return false;
           }
           elseif (isset($_data) && hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
-            $stmt = $pdo->prepare("SELECT `alias_domain` FROM `alias_domain` WHERE `target_domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $_data,
-            ));
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            while($row = array_shift($rows)) {
-              $aliasdomains[] = $row['alias_domain'];
-            }
+            $aliasdomains = AliasDomain::where('target_domain', $_data)->pluck('alias_domain')->toArray();
           }
           else {
-            $stmt = $pdo->prepare("SELECT `alias_domain` FROM `alias_domain` WHERE `target_domain` IN (SELECT `domain` FROM `domain_admins` WHERE `active` = '1' AND `username` = :username) OR 'admin' = :role");
-            $stmt->execute(array(
-              ':username' => $_SESSION['mailcow_cc_username'],
-              ':role' => $_SESSION['mailcow_cc_role'],
-            ));
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            while($row = array_shift($rows)) {
-              $aliasdomains[] = $row['alias_domain'];
+            if ($_SESSION['mailcow_cc_role'] === 'admin') {
+              $aliasdomains = AliasDomain::pluck('alias_domain')->toArray();
+            }
+            else {
+              $aliasdomains = AliasDomain::whereHas('domainAdmins', function ($query) {
+                $query->where('active', 1)->where('username', $_SESSION['mailcow_cc_username']);
+              })->pluck('alias_domain')->toArray();
             }
           }
           return $aliasdomains;
         break;
         case 'aliases':
-          $aliases = array();
           if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `id`, `address` FROM `alias` WHERE `address` != `goto` AND `domain` = :domain");
-          $stmt->execute(array(
-            ':domain' => $_data,
-          ));
-          $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-          while($row = array_shift($rows)) {
-            if ($_extra == "address"){
-              $aliases[] = $row['address'];
-            } else {
-              $aliases[] = $row['id'];
-            }
+
+          $stmt = Alias::where('domain', $_data)->where('address', '!=', 'goto');
+          if ($_extra === "address") {
+              return $stmt->pluck('address')->toArray();
           }
-          return $aliases;
+
+          return $stmt->pluck('id')->toArray();
         break;
         case 'alias_details':
           $aliasdata = array();
-          $stmt = $pdo->prepare("SELECT
-            `id`,
-            `domain`,
-            `goto`,
-            `address`,
-            `public_comment`,
-            `private_comment`,
-            `active`,
-            `sogo_visible`,
-            `created`,
-            `modified`
-              FROM `alias`
-                  WHERE (`id` = :id OR `address` = :address) AND `address` != `goto`");
-          $stmt->execute(array(
-              ':id' => $_data,
-              ':address' => $_data,
-          ));
-          $row = $stmt->fetch(PDO::FETCH_ASSOC);
-          $stmt = $pdo->prepare("SELECT `target_domain` FROM `alias_domain` WHERE `alias_domain` = :domain");
-          $stmt->execute(array(
-            ':domain' => $row['domain'],
-          ));
-          $row_alias_domain = $stmt->fetch(PDO::FETCH_ASSOC);
-          if (isset($row_alias_domain['target_domain']) && !empty($row_alias_domain['target_domain'])) {
-            $aliasdata['in_primary_domain'] = $row_alias_domain['target_domain'];
+          $alias = Alias::where('id', $_data)->orWhere('address', $_data)->first();
+          $aliasDomain = $alias->domain;
+          if ($aliasDomain && !empty($aliasDomain->target_domain)) {
+            $aliasdata['in_primary_domain'] = $aliasDomain->target_domain;
           }
           else {
             $aliasdata['in_primary_domain'] = "";
           }
-          $aliasdata['id'] = $row['id'];
-          $aliasdata['domain'] = $row['domain'];
-          $aliasdata['public_comment'] = $row['public_comment'];
-          $aliasdata['private_comment'] = $row['private_comment'];
-          $aliasdata['domain'] = $row['domain'];
-          $aliasdata['goto'] = $row['goto'];
-          $aliasdata['address'] = $row['address'];
+          $aliasdata['id'] = $alias->id;
+          $aliasdata['domain'] = $alias->domain;
+          $aliasdata['public_comment'] = $alias->public_comment;
+          $aliasdata['private_comment'] = $alias->private_comment;
+          $aliasdata['domain'] = $alias->domain;
+          $aliasdata['goto'] = $alias->goto;
+          $aliasdata['address'] = $alias->address;
           (!filter_var($aliasdata['address'], FILTER_VALIDATE_EMAIL)) ? $aliasdata['is_catch_all'] = 1 : $aliasdata['is_catch_all'] = 0;
-          $aliasdata['active'] = $row['active'];
-          $aliasdata['active_int'] = $row['active'];
-          $aliasdata['sogo_visible'] = $row['sogo_visible'];
-          $aliasdata['sogo_visible_int'] = $row['sogo_visible'];
-          $aliasdata['created'] = $row['created'];
-          $aliasdata['modified'] = $row['modified'];
+          $aliasdata['active'] = $alias->active;
+          $aliasdata['active_int'] = $alias->active;
+          $aliasdata['sogo_visible'] = $alias->sogo_visible;
+          $aliasdata['sogo_visible_int'] = $alias->sogo_visible;
+          $aliasdata['created'] = $alias->created;
+          $aliasdata['modified'] = $alias->modified;
           if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $aliasdata['domain'])) {
             return false;
           }
@@ -4534,31 +4435,15 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
         case 'alias_domain_details':
           $aliasdomaindata = array();
           $rl = ratelimit('get', 'domain', $_data);
-          $stmt = $pdo->prepare("SELECT
-            `alias_domain`,
-            `target_domain`,
-            `active`,
-            `created`,
-            `modified`
-              FROM `alias_domain`
-                  WHERE `alias_domain` = :aliasdomain");
-          $stmt->execute(array(
-            ':aliasdomain' => $_data,
-          ));
-          $row = $stmt->fetch(PDO::FETCH_ASSOC);
-          $stmt = $pdo->prepare("SELECT `backupmx` FROM `domain` WHERE `domain` = :target_domain");
-          $stmt->execute(array(
-            ':target_domain' => $row['target_domain']
-          ));
-          $row_parent = $stmt->fetch(PDO::FETCH_ASSOC);
-          $aliasdomaindata['alias_domain'] = $row['alias_domain'];
-          $aliasdomaindata['parent_is_backupmx'] = $row_parent['backupmx'];
-          $aliasdomaindata['target_domain'] = $row['target_domain'];
-          $aliasdomaindata['active'] = $row['active'];
-          $aliasdomaindata['active_int'] = $row['active'];
+          $aliasDomain = AliasDomain::find($_data);
+          $aliasdomaindata['alias_domain'] = $aliasDomain->alias_domain;
+          $aliasdomaindata['parent_is_backupmx'] = $aliasDomain->targetDomain->backupmx;
+          $aliasdomaindata['target_domain'] = $aliasDomain->target_domain;
+          $aliasdomaindata['active'] = $aliasDomain->active;
+          $aliasdomaindata['active_int'] = $aliasDomain->active;
           $aliasdomaindata['rl'] = $rl;
-          $aliasdomaindata['created'] = $row['created'];
-          $aliasdomaindata['modified'] = $row['modified'];
+          $aliasdomaindata['created'] = $aliasDomain->created;
+          $aliasdomaindata['modified'] = $aliasDomain->modified;
           if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $aliasdomaindata['target_domain'])) {
             return false;
           }
@@ -4650,60 +4535,39 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
             return false;
           }
-          $stmt = $pdo->prepare("SELECT `target_domain` FROM `alias_domain` WHERE `alias_domain` =  :domain");
-          $stmt->execute(array(
-            ':domain' => $_data
-          ));
-          $row = $stmt->fetch(PDO::FETCH_ASSOC);
-          if (!empty($row)) {
-            $_data = $row['target_domain'];
+
+          $aliasDomain = AliasDomain::find($_data);
+          if ($aliasDomain) {
+            $_data = $aliasDomain->target_domain;
           }
-          $stmt = $pdo->prepare("SELECT
-              `domain`,
-              `description`,
-              `aliases`,
-              `mailboxes`,
-              `defquota`,
-              `maxquota`,
-              `created`,
-              `modified`,
-              `quota`,
-              `relayhost`,
-              `relay_all_recipients`,
-              `relay_unknown_only`,
-              `backupmx`,
-              `gal`,
-              `active`
-                FROM `domain` WHERE `domain`= :domain");
-          $stmt->execute(array(
-            ':domain' => $_data
-          ));
-          $row = $stmt->fetch(PDO::FETCH_ASSOC);
-          if (empty($row)) {
+
+          $domain = Domain::find($_data);
+          if (!$domain){
             return false;
           }
+
           $stmt = $pdo->prepare("SELECT COUNT(`username`) AS `count`,
             COALESCE(SUM(`quota`), 0) AS `in_use`
               FROM `mailbox`
                 WHERE (`kind` = '' OR `kind` = NULL)
                   AND `domain` = :domain");
-          $stmt->execute(array(':domain' => $row['domain']));
+          $stmt->execute(array(':domain' => $domain->domain));
           $MailboxDataDomain = $stmt->fetch(PDO::FETCH_ASSOC);
           $stmt = $pdo->prepare("SELECT SUM(bytes) AS `bytes_total`, SUM(messages) AS `msgs_total` FROM `quota2`
             WHERE `username` IN (
               SELECT `username` FROM `mailbox`
                 WHERE `domain` = :domain
             );");
-          $stmt->execute(array(':domain' => $row['domain']));
+          $stmt->execute(array(':domain' => $domain->domain));
           $SumQuotaInUse = $stmt->fetch(PDO::FETCH_ASSOC);
           $rl = ratelimit('get', 'domain', $_data);
-          $domaindata['max_new_mailbox_quota']  = ($row['quota'] * 1048576) - $MailboxDataDomain['in_use'];
-          if ($domaindata['max_new_mailbox_quota'] > ($row['maxquota'] * 1048576)) {
-            $domaindata['max_new_mailbox_quota'] = ($row['maxquota'] * 1048576);
+          $domaindata['max_new_mailbox_quota']  = ($domain->quota * 1048576) - $MailboxDataDomain['in_use'];
+          if ($domaindata['max_new_mailbox_quota'] > ($domain->maxquota * 1048576)) {
+            $domaindata['max_new_mailbox_quota'] = ($domain->maxquota * 1048576);
           }
           $domaindata['def_new_mailbox_quota'] = $domaindata['max_new_mailbox_quota'];
-          if ($domaindata['def_new_mailbox_quota'] > ($row['defquota'] * 1048576)) {
-            $domaindata['def_new_mailbox_quota'] = ($row['defquota'] * 1048576);
+          if ($domaindata['def_new_mailbox_quota'] > ($domain->defquota * 1048576)) {
+            $domaindata['def_new_mailbox_quota'] = ($domain->defquota * 1048576);
           }
           $domaindata['quota_used_in_domain'] = $MailboxDataDomain['in_use'];
           if (!empty($SumQuotaInUse['bytes_total'])) {
@@ -4719,29 +4583,29 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             $domaindata['msgs_total'] = 0;
           }
           $domaindata['mboxes_in_domain'] = $MailboxDataDomain['count'];
-          $domaindata['mboxes_left'] = $row['mailboxes']  - $MailboxDataDomain['count'];
-          $domaindata['domain_name'] = $row['domain'];
-          $domaindata['domain_h_name'] = idn_to_utf8($row['domain']);
-          $domaindata['description'] = $row['description'];
-          $domaindata['max_num_aliases_for_domain'] = $row['aliases'];
-          $domaindata['max_num_mboxes_for_domain'] = $row['mailboxes'];
-          $domaindata['def_quota_for_mbox'] = $row['defquota'] * 1048576;
-          $domaindata['max_quota_for_mbox'] = $row['maxquota'] * 1048576;
-          $domaindata['max_quota_for_domain'] = $row['quota'] * 1048576;
-          $domaindata['relayhost'] = $row['relayhost'];
-          $domaindata['backupmx'] = $row['backupmx'];
-          $domaindata['backupmx_int'] = $row['backupmx'];
-          $domaindata['gal'] = $row['gal'];
-          $domaindata['gal_int'] = $row['gal'];
+          $domaindata['mboxes_left'] = $domain->mailboxes  - $MailboxDataDomain['count'];
+          $domaindata['domain_name'] = $domain->domain;
+          $domaindata['domain_h_name'] = idn_to_utf8($domain->domain);
+          $domaindata['description'] = $domain->description;
+          $domaindata['max_num_aliases_for_domain'] = $domain->aliases;
+          $domaindata['max_num_mboxes_for_domain'] = $domain->mailboxes;
+          $domaindata['def_quota_for_mbox'] = $domain->defquota * 1048576;
+          $domaindata['max_quota_for_mbox'] = $domain->maxquota * 1048576;
+          $domaindata['max_quota_for_domain'] = $domain->quota * 1048576;
+          $domaindata['relayhost'] = $domain->relayhost;
+          $domaindata['backupmx'] = $domain->backupmx;
+          $domaindata['backupmx_int'] = $domain->backupmx;
+          $domaindata['gal'] = $domain->gal;
+          $domaindata['gal_int'] = $domain->gal;
           $domaindata['rl'] = $rl;
-          $domaindata['active'] = $row['active'];
-          $domaindata['active_int'] = $row['active'];
-          $domaindata['relay_all_recipients'] = $row['relay_all_recipients'];
-          $domaindata['relay_all_recipients_int'] = $row['relay_all_recipients'];
-          $domaindata['relay_unknown_only'] = $row['relay_unknown_only'];
-          $domaindata['relay_unknown_only_int'] = $row['relay_unknown_only'];
-          $domaindata['created'] = $row['created'];
-          $domaindata['modified'] = $row['modified'];
+          $domaindata['active'] = $domain->active;
+          $domaindata['active_int'] = $domain->active;
+          $domaindata['relay_all_recipients'] = $domain->relay_all_recipients;
+          $domaindata['relay_all_recipients_int'] = $domain->relay_all_recipients;
+          $domaindata['relay_unknown_only'] = $domain->relay_unknown_only;
+          $domaindata['relay_unknown_only_int'] = $domain->relay_unknown_only;
+          $domaindata['created'] = $domain->created;
+          $domaindata['modified'] = $domain->modified;
           $stmt = $pdo->prepare("SELECT COUNT(`address`) AS `alias_count` FROM `alias`
             WHERE (`domain`= :domain OR `domain` IN (SELECT `alias_domain` FROM `alias_domain` WHERE `target_domain` = :domain2))
               AND `address` NOT IN (
@@ -4753,7 +4617,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           ));
           $AliasDataDomain = $stmt->fetch(PDO::FETCH_ASSOC);
           (isset($AliasDataDomain['alias_count'])) ? $domaindata['aliases_in_domain'] = $AliasDataDomain['alias_count'] : $domaindata['aliases_in_domain'] = "0";
-          $domaindata['aliases_left'] = $row['aliases'] - $AliasDataDomain['alias_count'];
+          $domaindata['aliases_left'] = $domain->aliases - $AliasDataDomain['alias_count'];
           if ($_SESSION['mailcow_cc_role'] == "admin")
           {
               $stmt = $pdo->prepare("SELECT GROUP_CONCAT(`username` SEPARATOR ', ') AS domain_admins FROM `domain_admins` WHERE `domain` = :domain");
@@ -5017,27 +4881,16 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           if (!hasMailboxObjectAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $_data)) {
             return false;
           }
-          $stmt = $pdo->prepare("SELECT
-              `username`,
-              `name`,
-              `kind`,
-              `multiple_bookings`,
-              `local_part`,
-              `active`,
-              `domain`
-                FROM `mailbox` WHERE `kind` REGEXP 'location|thing|group' AND `username` = :resource");
-          $stmt->execute(array(
-            ':resource' => $_data,
-          ));
-          $row = $stmt->fetch(PDO::FETCH_ASSOC);
-          $resourcedata['name'] = $row['username'];
-          $resourcedata['kind'] = $row['kind'];
-          $resourcedata['multiple_bookings'] = $row['multiple_bookings'];
-          $resourcedata['description'] = $row['name'];
-          $resourcedata['active'] = $row['active'];
-          $resourcedata['active_int'] = $row['active'];
-          $resourcedata['domain'] = $row['domain'];
-          $resourcedata['local_part'] = $row['local_part'];
+
+          $mailbox = Mailbox::where('username', $_data)->where('kind', 'REGEXP', 'location|thing|group')->first();
+          $resourcedata['name'] = $mailbox['username'];
+          $resourcedata['kind'] = $mailbox['kind'];
+          $resourcedata['multiple_bookings'] = $mailbox['multiple_bookings'];
+          $resourcedata['description'] = $mailbox['name'];
+          $resourcedata['active'] = $mailbox['active'];
+          $resourcedata['active_int'] = $mailbox['active'];
+          $resourcedata['domain'] = $mailbox['domain'];
+          $resourcedata['local_part'] = $mailbox['local_part'];
           if (!isset($resourcedata['domain']) ||
             (isset($resourcedata['domain']) && !hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $resourcedata['domain']))) {
             return false;
@@ -5064,12 +4917,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           }
 
           try {
-            $stmt = $pdo->prepare("SELECT `html`, `plain`, `mbox_exclude`, `alias_domain_exclude`, `skip_replies` FROM `domain_wide_footer`
-              WHERE `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain
-            ));
-            $footer = $stmt->fetch(PDO::FETCH_ASSOC);
+            return DomainWideFooter::where('domain', $domain)->firstOrFail()->attributesToArray();
           }
           catch (PDOException $e) {
             $_SESSION['return'][] = array(
@@ -5328,11 +5176,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               continue;
             }
             $domain = idn_to_ascii(strtolower(trim($domain)), 0, INTL_IDNA_VARIANT_UTS46);
-            $stmt = $pdo->prepare("SELECT `username` FROM `mailbox`
-              WHERE `domain` = :domain");
-            $stmt->execute(array(':domain' => $domain));
-            $num_results = count($stmt->fetchAll(PDO::FETCH_ASSOC));
-            if ($num_results != 0 || !empty($num_results)) {
+            if (Mailbox::where('domain', $domain)->exists()) {
               $_SESSION['return'][] = array(
                 'type' => 'danger',
                 'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -5349,26 +5193,11 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                 'msg' => 'Could not move mail storage to garbage collector: ' . $maildir_gc['msg']
               );
             }
-            $stmt = $pdo->prepare("DELETE FROM `domain` WHERE `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain,
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `domain_admins` WHERE `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain,
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `alias` WHERE `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain,
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `alias_domain` WHERE `target_domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain,
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `mailbox` WHERE `domain` = :domain");
-            $stmt->execute(array(
-              ':domain' => $domain,
-            ));
+            Domain::where('domain', $domain)->delete();
+            DomainAdmin::where('domain', $domain)->delete();
+            Alias::where('domain', $domain)->delete();
+            AliasDomain::where('target_domain', $domain)->delete();
+            Mailbox::where('domain', $domain)->delete();
             $stmt = $pdo->prepare("DELETE FROM `sender_acl` WHERE `logged_in_as` LIKE :domain");
             $stmt->execute(array(
               ':domain' => '%@'.$domain,
@@ -5472,14 +5301,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            $stmt = $pdo->prepare("DELETE FROM `alias` WHERE `id` = :id");
-            $stmt->execute(array(
-              ':id' => $alias_data['id']
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `sender_acl` WHERE `send_as` = :alias_address");
-            $stmt->execute(array(
-              ':alias_address' => $alias_data['address']
-            ));
+            Alias::where('id', $alias_data['id'])->delete();
+            SenderACL::where('send_as', $alias_data['address'])->delete();
             $_SESSION['return'][] = array(
               'type' => 'success',
               'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -5504,11 +5327,9 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            $stmt = $pdo->prepare("SELECT `target_domain` FROM `alias_domain`
-              WHERE `alias_domain`= :alias_domain");
-            $stmt->execute(array(':alias_domain' => $alias_domain));
-            $DomainData = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $DomainData['target_domain'])) {
+
+            $DomainData = AliasDomain::find($alias_domain);
+            if (!hasDomainAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $DomainData->target_domain)) {
               $_SESSION['return'][] = array(
                 'type' => 'danger',
                 'log' => array(__FUNCTION__, $_action, $_type, $_data_log, $_attr),
@@ -5516,14 +5337,9 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            $stmt = $pdo->prepare("DELETE FROM `alias_domain` WHERE `alias_domain` = :alias_domain");
-            $stmt->execute(array(
-              ':alias_domain' => $alias_domain,
-            ));
-            $stmt = $pdo->prepare("DELETE FROM `alias` WHERE `domain` = :alias_domain");
-            $stmt->execute(array(
-              ':alias_domain' => $alias_domain,
-            ));
+            $DomainData->delete();
+
+            Alias::where('domain', $alias_domain)->delete();
             $stmt = $pdo->prepare("DELETE FROM `spamalias` WHERE `address` LIKE :domain");
             $stmt->execute(array(
               ':domain' => '%@'.$alias_domain,
@@ -5602,10 +5418,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
                 'msg' => 'Could not move maildir to garbage collector: variables local_part and/or domain empty'
               );
             }
-            $stmt = $pdo->prepare("DELETE FROM `alias` WHERE `goto` = :username");
-            $stmt->execute(array(
-              ':username' => $username
-            ));
+            Alias::where('goto', $username)->delete();
+
             $stmt = $pdo->prepare("DELETE FROM `pushover` WHERE `username` = :username");
             $stmt->execute(array(
               ':username' => $username
@@ -5622,10 +5436,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             $stmt->execute(array(
               ':username' => $username
             ));
-            $stmt = $pdo->prepare("DELETE FROM `mailbox` WHERE `username` = :username");
-            $stmt->execute(array(
-              ':username' => $username
-            ));
+            Mailbox::where('username', $username)->delete();
+
             $stmt = $pdo->prepare("DELETE FROM `sender_acl` WHERE `logged_in_as` = :logged_in_as OR `send_as` = :send_as");
             $stmt->execute(array(
               ':logged_in_as' => $username,
@@ -5700,23 +5512,18 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             $stmt->execute(array(
               ':username' => $username,
             ));
-            $stmt = $pdo->prepare("SELECT `address`, `goto` FROM `alias`
-                WHERE `goto` REGEXP :username");
-            $stmt->execute(array(':username' => '(^|,)'.preg_quote($username, '/').'($|,)'));
-            $GotoData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($GotoData as $gotos) {
-              $goto_exploded = explode(',', $gotos['goto']);
+
+            $AliasData = Alias::where('goto', 'REGEXP', '(^|,)'.preg_quote($username, '/').'($|,)')->pluck('address', 'goto');
+
+            foreach ($AliasData as $gotos) {
+              $goto_exploded = explode(',', $gotos->goto);
               if (($key = array_search($username, $goto_exploded)) !== false) {
                 unset($goto_exploded[$key]);
               }
               $gotos_rebuild = implode(',', (array)$goto_exploded);
-              $stmt = $pdo->prepare("UPDATE `alias` SET
-                `goto` = :goto
-                  WHERE `address` = :address");
-              $stmt->execute(array(
-                ':goto' => $gotos_rebuild,
-                ':address' => $gotos['address']
-              ));
+
+              Alias::where('address', $gotos->address)
+                ->update(['goto' => $gotos_rebuild]);
             }
             try {
               $redis->hDel('RL_VALUE', $username);
@@ -5808,10 +5615,8 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               );
               continue;
             }
-            $stmt = $pdo->prepare("DELETE FROM `mailbox` WHERE `username` = :username");
-            $stmt->execute(array(
-              ':username' => $name
-            ));
+            Mailbox::where('username', $name)->delete();
+
             $stmt = $pdo->prepare("DELETE FROM `sogo_user_profile` WHERE `c_uid` = :username");
             $stmt->execute(array(
               ':username' => $name

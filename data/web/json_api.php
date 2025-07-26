@@ -1407,6 +1407,7 @@ if (isset($_GET['query'])) {
           case "alias-domain":
             switch ($object) {
               case "all":
+                $data = array();
                 $alias_domains = mailbox('get', 'alias_domains');
                 if (!empty($alias_domains)) {
                   foreach ($alias_domains as $alias_domain) {
@@ -1973,8 +1974,8 @@ if (isset($_GET['query'])) {
         case "ui_texts":
           process_edit_return(customize('edit', 'ui_texts', $attr));
         break;
-        case "ip_check":
-          process_edit_return(customize('edit', 'ip_check', $attr));
+        case "ip_check_location":
+          process_edit_return(customize('edit', 'ip_check_location', $attr));
         break;
         case "custom_login":
           process_edit_return(customize('edit', 'custom_login', $attr));

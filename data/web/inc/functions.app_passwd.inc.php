@@ -1,4 +1,6 @@
 <?php
+require_once $_SERVER['DOCUMENT_ROOT'] . '/models/AppPassword.php';
+
 function app_passwd($_action, $_data = null) {
 	global $pdo;
 	global $lang;
@@ -68,21 +70,21 @@ function app_passwd($_action, $_data = null) {
         );
         return false;
       }
-      $stmt = $pdo->prepare("INSERT INTO `app_passwd` (`name`, `mailbox`, `domain`, `password`, `imap_access`, `smtp_access`, `eas_access`, `dav_access`, `pop3_access`, `sieve_access`, `active`)
-        VALUES (:app_name, :mailbox, :domain, :password, :imap_access, :smtp_access, :eas_access, :dav_access, :pop3_access, :sieve_access, :active)");
-      $stmt->execute(array(
-        ':app_name' => $app_name,
-        ':mailbox' => $username,
-        ':domain' => $domain,
-        ':password' => $password_hashed,
-        ':imap_access' => $imap_access,
-        ':smtp_access' => $smtp_access,
-        ':eas_access' => $eas_access,
-        ':dav_access' => $dav_access,
-        ':pop3_access' => $pop3_access,
-        ':sieve_access' => $sieve_access,
-        ':active' => $active
-      ));
+      AppPassword::create(
+        array(
+          'name' => $app_name,
+          'mailbox' => $username,
+          'domain' => $domain,
+          'password' => $password_hashed,
+          'imap_access' => $imap_access,
+          'smtp_access' => $smtp_access,
+          'dav_access' => $dav_access,
+          'eas_access' => $eas_access,
+          'pop3_access' => $pop3_access,
+          'sieve_access' => $sieve_access,
+          'active' => $active
+        )
+      );
       $_SESSION['return'][] = array(
         'type' => 'success',
         'log' => array(__FUNCTION__, $_action, $_data_log),
@@ -143,39 +145,24 @@ function app_passwd($_action, $_data = null) {
             continue;
           }
           $password_hashed = hash_password($password);
-          $stmt = $pdo->prepare("UPDATE `app_passwd` SET
-              `password` = :password_hashed
-                WHERE `mailbox` = :username AND `id` = :id");
-          $stmt->execute(array(
-            ':password_hashed' => $password_hashed,
-            ':username' => $username,
-            ':id' => $id
-          ));
+          AppPassword::where('id', $id)
+            ->where('username', $username)
+            ->update(['password' => $password_hashed]);
         }
 
-        $stmt = $pdo->prepare("UPDATE `app_passwd` SET
-          `name` = :app_name,
-          `mailbox` = :username,
-          `imap_access` = :imap_access,
-          `smtp_access` = :smtp_access,
-          `eas_access` = :eas_access,
-          `dav_access` = :dav_access,
-          `pop3_access` = :pop3_access,
-          `sieve_access` = :sieve_access,
-          `active` = :active
-            WHERE `id` = :id");
-        $stmt->execute(array(
-          ':app_name' => $app_name,
-          ':username' => $username,
-          ':imap_access' => $imap_access,
-          ':smtp_access' => $smtp_access,
-          ':eas_access' => $eas_access,
-          ':dav_access' => $dav_access,
-          ':pop3_access' => $pop3_access,
-          ':sieve_access' => $sieve_access,
-          ':active' => $active,
-          ':id' => $id
-        ));
+
+        AppPassword::where('id', $id)
+          ->update([
+            'name' => $app_name,
+            'mailbox' => $username,
+            'imap_access' => $imap_access,
+            'smtp_access' => $smtp_access,
+            'eas_access' => $eas_access,
+            'dav_access' => $dav_access,
+            'pop3_access' => $pop3_access,
+            'sieve_access' => $sieve_access,
+            'active' => $active
+          ]);
         $_SESSION['return'][] = array(
           'type' => 'success',
           'log' => array(__FUNCTION__, $_action, $_data_log),
@@ -186,10 +173,8 @@ function app_passwd($_action, $_data = null) {
     case 'delete':
       $ids = (array)$_data['id'];
       foreach ($ids as $id) {
-        $stmt = $pdo->prepare("SELECT `mailbox` FROM `app_passwd` WHERE `id` = :id");
-        $stmt->execute(array(':id' => $id));
-        $mailbox = $stmt->fetch(PDO::FETCH_ASSOC)['mailbox'];
-        if (empty($mailbox)) {
+        $app_passwd = AppPassword::find($id);
+        if (!$app_passwd) {
           $_SESSION['return'][] = array(
             'type' => 'danger',
             'log' => array(__FUNCTION__, $_action, $_data_log),
@@ -197,7 +182,7 @@ function app_passwd($_action, $_data = null) {
           );
           return false;
         }
-        if (!hasMailboxObjectAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $mailbox)) {
+        if (!hasMailboxObjectAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $app_passwd->mailbox)) {
           $_SESSION['return'][] = array(
             'type' => 'danger',
             'log' => array(__FUNCTION__, $_action, $_data_log),
@@ -205,8 +190,7 @@ function app_passwd($_action, $_data = null) {
           );
           return false;
         }
-        $stmt = $pdo->prepare("DELETE FROM `app_passwd` WHERE `id`= :id");
-        $stmt->execute(array(':id' => $id));
+        $app_passwd->delete();
         $_SESSION['return'][] = array(
           'type' => 'success',
           'log' => array(__FUNCTION__, $_action, $_data_log),
@@ -215,27 +199,22 @@ function app_passwd($_action, $_data = null) {
       }
     break;
     case 'get':
-      $app_passwds = array();
-      $stmt = $pdo->prepare("SELECT `id`, `name` FROM `app_passwd` WHERE `mailbox` = :username");
-      $stmt->execute(array(':username' => $username));
-      $app_passwds = $stmt->fetchAll(PDO::FETCH_ASSOC);
-      return $app_passwds;
+      return AppPassword::where('mailbox', $username)->get([
+        'id', 'name'
+      ])->toArray();
     break;
     case 'details':
-      $app_passwd_data = array();
-      $stmt = $pdo->prepare("SELECT *
-          FROM `app_passwd`
-            WHERE `id` = :id");
-      $stmt->execute(array(':id' => $_data));
-      $app_passwd_data = $stmt->fetch(PDO::FETCH_ASSOC);
-      if (empty($app_passwd_data)) {
+      $app_passwd = AppPassword::where('id', $_data)->first();
+
+      if (!$app_passwd) {
         return false;
       }
-      if (!hasMailboxObjectAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $app_passwd_data['mailbox'])) {
+      if (!hasMailboxObjectAccess($_SESSION['mailcow_cc_username'], $_SESSION['mailcow_cc_role'], $app_passwd->mailbox)) {
         $app_passwd_data = array();
         return false;
       }
-      $app_passwd_data['name'] = htmlspecialchars(trim($app_passwd_data['name']));
+      $app_passwd_data = $app_passwd->attributesToArray();
+      $app_passwd_data['name'] = htmlspecialchars(trim($app_passwd->name));
       return $app_passwd_data;
     break;
   }

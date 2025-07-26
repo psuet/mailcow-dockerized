@@ -121,7 +121,7 @@ jQuery(function($){
     } else if (action == 'reset') {
       $.ajax({
         dataType: 'json',
-        url: '/api/v1/get/reset-last-login/' + encodeURIComponent(mailcow_cc_username),
+        url: 'y' + encodeURIComponent(mailcow_cc_username),
         jsonp: false,
         error: function () {
           console.log('cannot reset last logins');

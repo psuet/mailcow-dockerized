@@ -185,10 +185,12 @@ function customize($_action, $_item, $_data = null) {
             'msg' => 'ui_texts'
           );
         break;
-        case 'ip_check':
+        case 'ip_check_location':
           $ip_check = ($_data['ip_check_opt_in'] == "1") ? 1 : 0;
+          $ip_location = ($_data['ip_location_opt_in'] == "1") ? 1 : 0;
           try {
             $redis->set('IP_CHECK', $ip_check);
+            $redis->set('IP_LOCATION', $ip_location);
           }
           catch (RedisException $e) {
             $_SESSION['return'][] = array(
@@ -293,7 +295,7 @@ function customize($_action, $_item, $_data = null) {
           }
 
           if (empty($app_links)){
-            return false;
+            return [];
           }
 
           // convert from old style
@@ -372,10 +374,15 @@ function customize($_action, $_item, $_data = null) {
             return false;
           }
         break;
-        case 'ip_check':
+        case 'ip_check_location':
           try {
             $ip_check = ($ip_check = $redis->get('IP_CHECK')) ? $ip_check : 0;
-            return $ip_check;
+            $ip_location = ($ip_location = $redis->get('IP_LOCATION')) ? $ip_location : 0;
+
+            return [
+              'ip_check' => $ip_check,
+              'ip_location' => $ip_location
+            ];
           }
           catch (RedisException $e) {
             $_SESSION['return'][] = array(

@@ -273,7 +273,7 @@ if(file_exists($langFile)) {
   $lang = array_merge_real($lang, json_decode(file_get_contents($langFile), true));
 }
 
-
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inc/bootstrap_orm.inc.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inc/functions.acl.inc.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inc/functions.address_rewriting.inc.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inc/functions.admin.inc.php';
