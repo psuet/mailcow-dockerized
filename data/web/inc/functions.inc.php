@@ -1361,6 +1361,7 @@ function fido2($_data) {
       $stmt = $pdo->prepare("SELECT SHA2(`credentialId`, 256) AS `cid`, `created`, `certificateSubject`, `friendlyName` FROM `fido2` WHERE `username` = :username");
       $stmt->execute(array(':username' => $username));
       $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+      $fns = [];
       while($row = array_shift($rows)) {
         $fns[] = array(
           "subject" => (empty($row['certificateSubject']) ? 'Unknown (' . $row['created'] . ')' : $row['certificateSubject']),
@@ -2307,20 +2308,21 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
       if (!array_key_exists('login_provisioning', $settings)) {
         $settings['login_provisioning'] = 1;
       }
-      // return default client_scopes for generic-oidc if none is set
-      if ($settings["authsource"] == "generic-oidc" && empty($settings["client_scopes"])){
-        $settings["client_scopes"] = "openid profile email mailcow_template";
+
+      if (array_key_exists("authsource", $settings)){
+        // return default client_scopes for generic-oidc if none is set
+        if ($settings["authsource"] == "generic-oidc" && empty($settings["client_scopes"])){
+          $settings["client_scopes"] = "openid profile email mailcow_template";
+        }
+
+        // return default ldap options
+        if ($settings["authsource"] == "ldap"){
+          $settings['use_ssl'] = !isset($settings['use_ssl']) ? false : $settings['use_ssl'];
+          $settings['use_tls'] = !isset($settings['use_tls']) ? false : $settings['use_tls'];
+          $settings['ignore_ssl_errors'] = !isset($settings['ignore_ssl_errors']) ? false : $settings['ignore_ssl_errors'];
+        }
       }
-      if ($_extra['hide_sensitive']){
-        $settings['client_secret'] = '';
-        $settings['access_token'] = '';
-      }
-      // return default ldap options
-      if ($settings["authsource"] == "ldap"){
-        $settings['use_ssl'] = !isset($settings['use_ssl']) ? false : $settings['use_ssl'];
-        $settings['use_tls'] = !isset($settings['use_tls']) ? false : $settings['use_tls'];
-        $settings['ignore_ssl_errors'] = !isset($settings['ignore_ssl_errors']) ? false : $settings['ignore_ssl_errors'];
-      }
+
       return $settings;
     break;
     case 'edit':
@@ -2599,6 +2601,10 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
     case "init":
       $settings = identity_provider('get');
       $provider = null;
+
+      if (!array_key_exists("authsource", $settings)){
+        return null;
+      }
 
       switch ($settings['authsource']) {
         case "keycloak":

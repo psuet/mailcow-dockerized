@@ -357,7 +357,7 @@ function customize($_action, $_item, $_data = null) {
             } else {
               $img_data = explode('base64,', customize('get', 'main_logo_dark'));
             }
-            if ($img_data[1]) {
+            if (array_key_exists(1, $img_data)) {
               $image->readImageBlob(base64_decode($img_data[1]));
               return $image->identifyImage();
             }
